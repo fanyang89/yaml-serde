@@ -1,4 +1,4 @@
-Serde YAML
+YAML Serde
 ==========
 
 [<img alt="github" src="https://img.shields.io/badge/github-yaml/yaml--serde-8da0cb?style=for-the-badge&labelColor=555555&logo=github" height="20">](https://github.com/yaml/yaml-serde)
@@ -33,7 +33,7 @@ Release notes are available under [GitHub releases].
 
 [GitHub releases]: https://github.com/yaml/yaml-serde/releases
 
-## Migrating from serde_yaml
+## Migrating from `serde_yaml`
 
 To migrate with minimal code changes, use Cargo's package renaming:
 
