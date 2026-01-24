@@ -1,6 +1,6 @@
 [package]
 name = "yaml_serde"
-version = "0.10.0"
+version = "0.10.1"
 authors = ["YAML Organization <noreply@yaml.org>"]
 categories = ["encoding", "parser-implementations"]
 description = "YAML data format for Serde"
