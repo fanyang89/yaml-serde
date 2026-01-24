@@ -16,6 +16,7 @@ MAKES-CLEAN := \
 CARGO-TARGETS := \
   build \
   check \
+  clippy \
   install \
   test \
   uninstall \
