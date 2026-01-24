@@ -18,17 +18,43 @@ CARGO-TARGETS := \
   uninstall \
   update \
 
+RELEASE-UTIL := $(ROOT)/util/release
+
 SECRETS-FILE := $(HOME)/.yaml-serde-secrets.yaml
+
+RELEASE-STEPS := \
+  release-check \
+  release-bump \
+  release-tag \
+  release-publish \
 
 
 $(CARGO-TARGETS): $(CARGO)
 	cargo $@ $(opts)
 
-publish: $(CARGO) $(YS)
-ifeq (,$(wildcard $(SECRETS-FILE)))
-	@echo 'ERROR: $(SECRETS-FILE) not found' >&2
-	exit 1
-else
+publish: $(RELEASE-STEPS)
+
+release-publish: $(CARGO) $(YS)
 	CARGO_TOKEN=$$(ys -e '.crates.token:say' $(SECRETS-FILE)) \
 	  $(CARGO) publish --token "$$CARGO_TOKEN"
+
+release-check:
+ifndef o
+	@echo 'o=<old-version> required'
+	@exit 1
 endif
+ifndef n
+	@echo 'n=<new-version> required'
+	@exit 1
+endif
+ifeq (,$(wildcard $(SECRETS-FILE)))
+	@echo 'ERROR: $(SECRETS-FILE) not found' >&2
+	@exit 1
+endif
+	$(RELEASE-UTIL) release-check
+
+release-bump:
+	OLD_VERSION=$(o) NEW_VERSION=$(n) $(RELEASE-UTIL) version-bump
+
+release-tag:
+	$(RELEASE-UTIL) release-tag
