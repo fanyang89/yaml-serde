@@ -6,6 +6,9 @@ include $M/yamlscript.mk
 include $M/clean.mk
 include $M/shell.mk
 
+# Override CARGO from rust.mk (it incorrectly points to rustup)
+CARGO := $(CARGO-BIN)/cargo
+
 MAKES-CLEAN := \
   target \
   Cargo.lock \
@@ -27,15 +30,16 @@ RELEASE-STEPS := \
   release-bump \
   release-tag \
   release-publish \
+  release-push \
 
 
 $(CARGO-TARGETS): $(CARGO)
 	cargo $@ $(opts)
 
-publish: $(RELEASE-STEPS)
+release: $(RELEASE-STEPS)
 
 release-publish: $(CARGO) $(YS)
-	CARGO_TOKEN=$$(ys -e '.crates.token:say' $(SECRETS-FILE)) \
+	CARGO_TOKEN=$$(ys -e '.crates.token:say' $(SECRETS-FILE)) && \
 	  $(CARGO) publish --token "$$CARGO_TOKEN"
 
 release-check:
@@ -51,10 +55,13 @@ ifeq (,$(wildcard $(SECRETS-FILE)))
 	@echo 'ERROR: $(SECRETS-FILE) not found' >&2
 	@exit 1
 endif
-	$(RELEASE-UTIL) release-check
+	NEW_VERSION=$(n) $(RELEASE-UTIL) release-check
 
 release-bump:
 	OLD_VERSION=$(o) NEW_VERSION=$(n) $(RELEASE-UTIL) version-bump
 
 release-tag:
 	$(RELEASE-UTIL) release-tag
+
+release-push:
+	$(RELEASE-UTIL) release-push

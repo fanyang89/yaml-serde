@@ -15,7 +15,9 @@ main() {
 
 do-release-check() {
   VERSION=$(get_version)
-  echo "Starting release process for version $VERSION"
+  # Use NEW_VERSION from env for the confirmation message
+  TARGET_VERSION=${NEW_VERSION:-$VERSION}
+  echo "Starting release process: $VERSION -> $TARGET_VERSION"
   echo ""
 
   do-check-clean
@@ -23,10 +25,10 @@ do-release-check() {
   do-check-tag
 
   echo ""
-  read -r -p "Create tag $VERSION and publish to crates.io? [y/N] " answer
+  read -r -p "Create tag $TARGET_VERSION and publish to crates.io? [y/N] " answer
   if [[ ! ${answer:-N} =~ ^[Yy] ]]; then
     echo "Release cancelled"
-    exit 0
+    exit 1
   fi
 }
 
@@ -42,13 +44,18 @@ do-version-bump() {
   # Update Cargo.toml
   perl -pi -e "s/^version = \"$OLD_VERSION\"/version = \"$NEW_VERSION\"/" Cargo.toml
 
+  # Update src/lib.rs html_root_url
+  perl -pi -e \
+    "s|html_root_url = \"https://docs.rs/yaml_serde/$OLD_VERSION\"|html_root_url = \"https://docs.rs/yaml_serde/$NEW_VERSION\"|" \
+    src/lib.rs
+
   # Verify the change
   NEW_VER=$(get_version)
   if [[ $NEW_VER != "$NEW_VERSION" ]]; then
     die "ERROR: Version bump failed. Expected $NEW_VERSION, got $NEW_VER"
   fi
 
-  echo "Version updated in Cargo.toml"
+  echo "Version updated in Cargo.toml and src/lib.rs"
   echo "Next steps:"
   echo "  1. Review the changes: git diff"
   echo "  2. Commit: git commit -am 'Release $NEW_VERSION'"
@@ -65,10 +72,11 @@ do-check-version() {
 
 # Check if git tag already exists
 do-check-tag() {
-  if git rev-parse "$VERSION" >/dev/null 2>&1; then
-    die "ERROR: Tag $VERSION already exists"
+  TARGET_VERSION=${NEW_VERSION:-$(get_version)}
+  if git rev-parse "$TARGET_VERSION" >/dev/null 2>&1; then
+    die "ERROR: Tag $TARGET_VERSION already exists"
   fi
-  echo "Tag $VERSION does not exist - OK to proceed"
+  echo "Tag $TARGET_VERSION does not exist - OK to proceed"
 }
 
 # Check working directory is clean
@@ -79,7 +87,7 @@ do-check-clean() {
   echo "Working directory is clean"
 }
 
-# Create and push git tag
+# Create git tag locally (does not push)
 do-release-tag() {
   VERSION=$(get_version)
 
@@ -87,13 +95,24 @@ do-release-tag() {
     die "ERROR: Tag $VERSION already exists"
   fi
 
+  # Commit version changes before tagging
+  git add Cargo.toml src/lib.rs
+  git commit -m "Release $VERSION"
+
   echo "Creating tag $VERSION..."
   git tag "$VERSION"
 
-  echo "Pushing tag $VERSION to origin..."
-  git push origin "$VERSION"
+  echo "Tag $VERSION created locally"
+}
 
-  echo "Tag $VERSION created and pushed"
+# Push commit and tag to origin (runs after successful publish)
+do-release-push() {
+  VERSION=$(get_version)
+
+  echo "Pushing commit and tag $VERSION to origin..."
+  git push origin main "$VERSION"
+
+  echo "Release $VERSION pushed to GitHub"
 }
 
 die() {
