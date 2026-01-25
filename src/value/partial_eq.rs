@@ -38,7 +38,7 @@ impl PartialEq<String> for Value {
     /// assert!(Value::String("lorem".into()) == "lorem".to_string());
     /// ```
     fn eq(&self, other: &String) -> bool {
-        self.as_str().map_or(false, |s| s == other)
+        self.as_str().is_some_and(|s| s == other)
     }
 }
 

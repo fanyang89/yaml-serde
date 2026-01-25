@@ -163,7 +163,7 @@ where
 /// Used in panic messages.
 struct Type<'a>(&'a Value);
 
-impl<'a> fmt::Display for Type<'a> {
+impl fmt::Display for Type<'_> {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         match self.0 {
             Value::Null => formatter.write_str("null"),

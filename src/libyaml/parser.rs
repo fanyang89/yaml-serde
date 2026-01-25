@@ -196,6 +196,6 @@ impl Debug for Anchor {
 
 impl Drop for ParserPinned<'_> {
     fn drop(&mut self) {
-        unsafe { sys::yaml_parser_delete(&mut self.sys) }
+        unsafe { sys::yaml_parser_delete(&raw mut self.sys) }
     }
 }

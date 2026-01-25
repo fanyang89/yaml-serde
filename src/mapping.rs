@@ -451,20 +451,16 @@ impl PartialOrd for Mapping {
             let mut other = other.into_iter();
 
             loop {
-                let x = match this.next() {
-                    None => {
-                        if other.next().is_none() {
-                            return Ordering::Equal;
-                        } else {
-                            return Ordering::Less;
-                        }
+                let Some(x) = this.next() else {
+                    if other.next().is_none() {
+                        return Ordering::Equal;
+                    } else {
+                        return Ordering::Less;
                     }
-                    Some(val) => val,
                 };
 
-                let y = match other.next() {
-                    None => return Ordering::Greater,
-                    Some(val) => val,
+                let Some(y) = other.next() else {
+                    return Ordering::Greater;
                 };
 
                 match cmp(x, y) {

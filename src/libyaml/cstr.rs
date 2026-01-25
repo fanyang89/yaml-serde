@@ -53,7 +53,7 @@ impl Display for CStr<'_> {
     }
 }
 
-impl<'a> Debug for CStr<'a> {
+impl Debug for CStr<'_> {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         let ptr = self.ptr.as_ptr();
         let len = self.len();
