@@ -14,9 +14,10 @@ rust-version = "1.82"
 [dependencies]
 indexmap = "2.2.1"
 itoa = "1.0"
+ouroboros = "0.18"
 ryu = "1.0"
 serde = "1.0.195"
-unsafe-libyaml = "0.2.11"
+libyaml-safer = "0.3"
 
 [dev-dependencies]
 anyhow = "1.0.79"

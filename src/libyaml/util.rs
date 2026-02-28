@@ -1,48 +1,47 @@
-use std::marker::PhantomData;
-use std::mem::{self, MaybeUninit};
-use std::ops::Deref;
-use std::ptr::{addr_of, NonNull};
+use std::fmt::{self, Write};
+use std::str;
 
-pub(crate) struct Owned<T, Init = T> {
-    ptr: NonNull<T>,
-    marker: PhantomData<NonNull<Init>>,
-}
+pub(crate) fn debug_lossy(mut bytes: &[u8], formatter: &mut fmt::Formatter) -> fmt::Result {
+    formatter.write_char('"')?;
 
-impl<T> Owned<T> {
-    pub fn new_uninit() -> Owned<MaybeUninit<T>, T> {
-        // FIXME: use Box::new_uninit when stable
-        let boxed = Box::new(MaybeUninit::<T>::uninit());
-        Owned {
-            ptr: unsafe { NonNull::new_unchecked(Box::into_raw(boxed)) },
-            marker: PhantomData,
+    while !bytes.is_empty() {
+        let from_utf8_result = str::from_utf8(bytes);
+        let valid = match from_utf8_result {
+            Ok(valid) => valid,
+            Err(utf8_error) => {
+                let valid_up_to = utf8_error.valid_up_to();
+                unsafe { str::from_utf8_unchecked(&bytes[..valid_up_to]) }
+            }
+        };
+
+        let mut written = 0;
+        for (i, ch) in valid.char_indices() {
+            let esc = ch.escape_debug();
+            if esc.len() != 1 && ch != '\'' {
+                formatter.write_str(&valid[written..i])?;
+                for ch in esc {
+                    formatter.write_char(ch)?;
+                }
+                written = i + ch.len_utf8();
+            }
+        }
+        formatter.write_str(&valid[written..])?;
+
+        match from_utf8_result {
+            Ok(_valid) => break,
+            Err(utf8_error) => {
+                let end_of_broken = if let Some(error_len) = utf8_error.error_len() {
+                    valid.len() + error_len
+                } else {
+                    bytes.len()
+                };
+                for b in &bytes[valid.len()..end_of_broken] {
+                    write!(formatter, "\\x{:02x}", b)?;
+                }
+                bytes = &bytes[end_of_broken..];
+            }
         }
     }
 
-    pub unsafe fn assume_init(definitely_init: Owned<MaybeUninit<T>, T>) -> Owned<T> {
-        let ptr = definitely_init.ptr;
-        mem::forget(definitely_init);
-        Owned {
-            ptr: ptr.cast(),
-            marker: PhantomData,
-        }
-    }
-}
-
-#[repr(transparent)]
-pub(crate) struct InitPtr<T> {
-    pub ptr: *mut T,
-}
-
-impl<T, Init> Deref for Owned<T, Init> {
-    type Target = InitPtr<Init>;
-
-    fn deref(&self) -> &Self::Target {
-        unsafe { &*addr_of!(self.ptr).cast::<InitPtr<Init>>() }
-    }
-}
-
-impl<T, Init> Drop for Owned<T, Init> {
-    fn drop(&mut self) {
-        let _ = unsafe { Box::from_raw(self.ptr.as_ptr()) };
-    }
+    formatter.write_char('"')
 }

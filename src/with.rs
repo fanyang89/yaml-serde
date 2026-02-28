@@ -922,9 +922,10 @@ pub mod singleton_map {
 ///         bs: vec![Enum::Int(1)],
 ///     };
 ///
-///     let mut buf = Vec::new();
-///     let mut serializer = yaml_serde::Serializer::new(&mut buf);
+///     let buf = Vec::new();
+///     let mut serializer = yaml_serde::Serializer::new(buf);
 ///     yaml_serde::with::singleton_map_recursive::serialize(&object, &mut serializer).unwrap();
+///     let buf = serializer.into_inner().unwrap();
 ///     io::stdout().write_all(&buf).unwrap();
 ///
 ///     let deserializer = yaml_serde::Deserializer::from_slice(&buf);

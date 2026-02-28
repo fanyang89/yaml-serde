@@ -5,13 +5,13 @@ use serde::de::Deserialize;
 #[cfg(not(miri))]
 use serde::de::{SeqAccess, Visitor};
 use serde_derive::{Deserialize, Serialize};
-use yaml_serde::value::{Tag, TaggedValue};
-use yaml_serde::{Deserializer, Value};
 #[cfg(not(miri))]
 use std::collections::BTreeMap;
 #[cfg(not(miri))]
 use std::fmt;
 use std::fmt::Debug;
+use yaml_serde::value::{Tag, TaggedValue};
+use yaml_serde::{Deserializer, Value};
 
 fn test_error<'de, T>(yaml: &'de str, expected: &str)
 where
@@ -32,7 +32,7 @@ where
 #[test]
 fn test_scan_error() {
     let yaml = ">\n@";
-    let expected = "found character that cannot start any token at line 2 column 1, while scanning for the next token";
+    let expected = "Scanner error: line 2 column 1: found character that cannot start any token while scanning for the next token (line 2 column 1)";
     test_error::<Value>(yaml, expected);
 }
 
@@ -154,7 +154,7 @@ fn test_second_document_syntax_error() {
     let second_doc = de.next().unwrap();
     let result = <usize as serde::Deserialize>::deserialize(second_doc);
     let expected =
-        "did not find expected node content at line 4 column 1, while parsing a block node";
+        "Parser error: line 4 column 1: did not find expected node content while parsing a block node (line 4 column 1)";
     assert_eq!(expected, result.unwrap_err().to_string());
 }
 

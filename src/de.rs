@@ -814,9 +814,7 @@ impl<'de> de::EnumAccess<'de> for UnitVariantAccess<'de, '_, '_> {
     }
 }
 
-impl<'de> de::VariantAccess<'de>
-    for UnitVariantAccess<'de, '_, '_>
-{
+impl<'de> de::VariantAccess<'de> for UnitVariantAccess<'de, '_, '_> {
     type Error = Error;
 
     fn unit_variant(self) -> Result<()> {

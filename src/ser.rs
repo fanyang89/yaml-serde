@@ -4,13 +4,12 @@
 
 use crate::error::{self, Error, ErrorImpl};
 use crate::libyaml;
-use crate::libyaml::emitter::{Emitter, Event, Mapping, Scalar, ScalarStyle, Sequence};
+use crate::libyaml::emitter::{EmitError, Event, Mapping, Scalar, ScalarStyle, Sequence};
 use crate::value::tagged::{self, MaybeTag};
 use serde::de::Visitor;
 use serde::ser::{self, Serializer as _};
 use std::fmt::{self, Display};
 use std::io;
-use std::marker::PhantomData;
 use std::mem;
 use std::num;
 use std::str;
@@ -27,8 +26,8 @@ type Result<T, E = Error> = std::result::Result<T, E>;
 /// use std::collections::BTreeMap;
 ///
 /// fn main() -> Result<()> {
-///     let mut buffer = Vec::new();
-///     let mut ser = yaml_serde::Serializer::new(&mut buffer);
+///     let buffer = Vec::new();
+///     let mut ser = yaml_serde::Serializer::new(buffer);
 ///
 ///     let mut object = BTreeMap::new();
 ///     object.insert("k", 107);
@@ -37,6 +36,7 @@ type Result<T, E = Error> = std::result::Result<T, E>;
 ///     object.insert("J", 74);
 ///     object.serialize(&mut ser)?;
 ///
+///     let buffer = ser.into_inner()?;
 ///     assert_eq!(buffer, b"k: 107\n---\nJ: 74\nk: 107\n");
 ///     Ok(())
 /// }
@@ -44,8 +44,8 @@ type Result<T, E = Error> = std::result::Result<T, E>;
 pub struct Serializer<W> {
     depth: usize,
     state: State,
-    emitter: Emitter<'static>,
-    writer: PhantomData<W>,
+    emitter: libyaml::emitter::Emitter,
+    _marker: std::marker::PhantomData<W>,
 }
 
 enum State {
@@ -58,36 +58,75 @@ enum State {
 
 impl<W> Serializer<W>
 where
-    W: io::Write,
+    W: io::Write + 'static,
 {
     /// Creates a new YAML serializer.
     pub fn new(writer: W) -> Self {
-        let mut emitter = Emitter::new({
-            let writer = Box::new(writer);
-            unsafe { mem::transmute::<Box<dyn io::Write>, Box<dyn io::Write>>(writer) }
-        });
+        let mut emitter = libyaml::emitter::Emitter::create(Box::new(writer));
         emitter.emit(Event::StreamStart).unwrap();
+
         Serializer {
             depth: 0,
             state: State::NothingInParticular,
             emitter,
-            writer: PhantomData,
+            _marker: std::marker::PhantomData,
         }
     }
 
     /// Calls [`.flush()`](io::Write::flush) on the underlying `io::Write`
     /// object.
     pub fn flush(&mut self) -> Result<()> {
-        self.emitter.flush()?;
-        Ok(())
+        self.emitter.flush().map_err(|e| match e {
+            EmitError::Libyaml(e) => error::new(ErrorImpl::Libyaml(e)),
+        })
     }
 
     /// Unwrap the underlying `io::Write` object from the `Serializer`.
-    pub fn into_inner(mut self) -> Result<W> {
-        self.emitter.emit(Event::StreamEnd)?;
-        self.emitter.flush()?;
-        let writer = self.emitter.into_inner();
-        Ok(*unsafe { Box::from_raw(Box::into_raw(writer).cast::<W>()) })
+    pub fn into_inner(self) -> Result<W> {
+        let mut this = std::mem::ManuallyDrop::new(self);
+
+        this.emitter.emit(Event::StreamEnd).map_err(|e| {
+            unsafe {
+                std::mem::ManuallyDrop::drop(&mut this);
+            }
+            error::new(ErrorImpl::Libyaml(match e {
+                EmitError::Libyaml(e) => e,
+            }))
+        })?;
+        this.emitter.flush().map_err(|e| {
+            unsafe {
+                std::mem::ManuallyDrop::drop(&mut this);
+            }
+            error::new(ErrorImpl::Libyaml(match e {
+                EmitError::Libyaml(e) => e,
+            }))
+        })?;
+
+        // SAFETY: We're extracting the emitter before forgetting the serializer.
+        // The state field is expected to be NothingInParticular at this point
+        // (take_tag() is called during emit), so forgetting it is safe.
+        let emitter = unsafe { std::ptr::read(&this.emitter) };
+        std::mem::forget(this);
+
+        let heads = emitter.into_heads();
+        let writer: Box<dyn io::Write> = heads.write;
+
+        // SAFETY: We created the Box<dyn io::Write> from Box<W> in new(),
+        // and W: 'static is required. The conversion is safe because:
+        // - Box<dyn io::Write> is a fat pointer (data + vtable)
+        // - Box<W> is a thin pointer (data only)
+        // - The data pointer is the same in both cases
+        // - We're recovering the original concrete type
+        let writer: Box<W> = unsafe {
+            // Get the raw fat pointer
+            let fat_ptr = Box::into_raw(writer);
+            // Extract the data pointer (first word of the fat pointer)
+            let data_ptr = fat_ptr as *mut W;
+            // Reconstruct Box<W> from the data pointer
+            Box::from_raw(data_ptr)
+        };
+
+        Ok(*writer)
     }
 
     fn emit_scalar(&mut self, mut scalar: Scalar) -> Result<()> {
@@ -96,7 +135,11 @@ where
             scalar.tag = Some(tag);
         }
         self.value_start()?;
-        self.emitter.emit(Event::Scalar(scalar))?;
+        self.emitter
+            .emit(Event::Scalar(scalar))
+            .map_err(|e| match e {
+                EmitError::Libyaml(e) => error::new(ErrorImpl::Libyaml(e)),
+            })?;
         self.value_end()
     }
 
@@ -104,12 +147,17 @@ where
         self.flush_mapping_start()?;
         self.value_start()?;
         let tag = self.take_tag();
-        self.emitter.emit(Event::SequenceStart(Sequence { tag }))?;
-        Ok(())
+        self.emitter
+            .emit(Event::SequenceStart(Sequence { tag }))
+            .map_err(|e| match e {
+                EmitError::Libyaml(e) => error::new(ErrorImpl::Libyaml(e)),
+            })
     }
 
     fn emit_sequence_end(&mut self) -> Result<()> {
-        self.emitter.emit(Event::SequenceEnd)?;
+        self.emitter.emit(Event::SequenceEnd).map_err(|e| match e {
+            EmitError::Libyaml(e) => error::new(ErrorImpl::Libyaml(e)),
+        })?;
         self.value_end()
     }
 
@@ -117,18 +165,27 @@ where
         self.flush_mapping_start()?;
         self.value_start()?;
         let tag = self.take_tag();
-        self.emitter.emit(Event::MappingStart(Mapping { tag }))?;
-        Ok(())
+        self.emitter
+            .emit(Event::MappingStart(Mapping { tag }))
+            .map_err(|e| match e {
+                EmitError::Libyaml(e) => error::new(ErrorImpl::Libyaml(e)),
+            })
     }
 
     fn emit_mapping_end(&mut self) -> Result<()> {
-        self.emitter.emit(Event::MappingEnd)?;
+        self.emitter.emit(Event::MappingEnd).map_err(|e| match e {
+            EmitError::Libyaml(e) => error::new(ErrorImpl::Libyaml(e)),
+        })?;
         self.value_end()
     }
 
     fn value_start(&mut self) -> Result<()> {
         if self.depth == 0 {
-            self.emitter.emit(Event::DocumentStart)?;
+            self.emitter
+                .emit(Event::DocumentStart)
+                .map_err(|e| match e {
+                    EmitError::Libyaml(e) => error::new(ErrorImpl::Libyaml(e)),
+                })?;
         }
         self.depth += 1;
         Ok(())
@@ -137,7 +194,9 @@ where
     fn value_end(&mut self) -> Result<()> {
         self.depth -= 1;
         if self.depth == 0 {
-            self.emitter.emit(Event::DocumentEnd)?;
+            self.emitter.emit(Event::DocumentEnd).map_err(|e| match e {
+                EmitError::Libyaml(e) => error::new(ErrorImpl::Libyaml(e)),
+            })?;
         }
         Ok(())
     }
@@ -168,7 +227,7 @@ where
 
 impl<W> ser::Serializer for &mut Serializer<W>
 where
-    W: io::Write,
+    W: io::Write + 'static,
 {
     type Ok = ();
     type Error = Error;
@@ -525,7 +584,7 @@ where
 
 impl<W> ser::SerializeSeq for &mut Serializer<W>
 where
-    W: io::Write,
+    W: io::Write + 'static,
 {
     type Ok = ();
     type Error = Error;
@@ -544,7 +603,7 @@ where
 
 impl<W> ser::SerializeTuple for &mut Serializer<W>
 where
-    W: io::Write,
+    W: io::Write + 'static,
 {
     type Ok = ();
     type Error = Error;
@@ -563,7 +622,7 @@ where
 
 impl<W> ser::SerializeTupleStruct for &mut Serializer<W>
 where
-    W: io::Write,
+    W: io::Write + 'static,
 {
     type Ok = ();
     type Error = Error;
@@ -582,7 +641,7 @@ where
 
 impl<W> ser::SerializeTupleVariant for &mut Serializer<W>
 where
-    W: io::Write,
+    W: io::Write + 'static,
 {
     type Ok = ();
     type Error = Error;
@@ -601,7 +660,7 @@ where
 
 impl<W> ser::SerializeMap for &mut Serializer<W>
 where
-    W: io::Write,
+    W: io::Write + 'static,
 {
     type Ok = ();
     type Error = Error;
@@ -649,7 +708,7 @@ where
 
 impl<W> ser::SerializeStruct for &mut Serializer<W>
 where
-    W: io::Write,
+    W: io::Write + 'static,
 {
     type Ok = ();
     type Error = Error;
@@ -669,7 +728,7 @@ where
 
 impl<W> ser::SerializeStructVariant for &mut Serializer<W>
 where
-    W: io::Write,
+    W: io::Write + 'static,
 {
     type Ok = ();
     type Error = Error;
@@ -693,7 +752,7 @@ where
 /// return an error.
 pub fn to_writer<W, T>(writer: W, value: &T) -> Result<()>
 where
-    W: io::Write,
+    W: io::Write + 'static,
     T: ?Sized + ser::Serialize,
 {
     let mut serializer = Serializer::new(writer);
@@ -708,7 +767,10 @@ pub fn to_string<T>(value: &T) -> Result<String>
 where
     T: ?Sized + ser::Serialize,
 {
-    let mut vec = Vec::with_capacity(128);
-    to_writer(&mut vec, value)?;
+    let vec: Vec<u8> = {
+        let mut serializer = Serializer::new(Vec::with_capacity(128));
+        value.serialize(&mut serializer)?;
+        serializer.into_inner()?
+    };
     String::from_utf8(vec).map_err(|error| error::new(ErrorImpl::FromUtf8(error)))
 }

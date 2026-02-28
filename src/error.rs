@@ -138,11 +138,10 @@ impl From<libyaml::Error> for Error {
     }
 }
 
-impl From<emitter::Error> for Error {
-    fn from(err: emitter::Error) -> Self {
+impl From<emitter::EmitError> for Error {
+    fn from(err: emitter::EmitError) -> Self {
         match err {
-            emitter::Error::Libyaml(err) => Self::from(err),
-            emitter::Error::Io(err) => new(ErrorImpl::Io(err)),
+            emitter::EmitError::Libyaml(err) => Self::from(err),
         }
     }
 }

@@ -8,9 +8,9 @@
 
 use indoc::indoc;
 use serde_derive::Deserialize;
-use yaml_serde::{Deserializer, Number, Value};
 use std::collections::BTreeMap;
 use std::fmt::Debug;
+use yaml_serde::{Deserializer, Number, Value};
 
 fn test_de<T>(yaml: &str, expected: &T)
 where
